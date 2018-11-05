@@ -11,7 +11,7 @@ Key Rules:
 """
 import numpy as np
 
-from errors import IncorrectCoordinatesError, HexExistsError, MismatchError
+from .errors import IncorrectCoordinatesError, HexExistsError, MismatchError
 from hexy import *
 
 # The bases of the axial coordinate system
