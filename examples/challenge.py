@@ -1,5 +1,7 @@
 import sys
 sys.path.append("..")
+from functools import lru_cache
+from random import shuffle
 
 import numpy as np
 import hexy as hx
@@ -8,7 +10,6 @@ import pygame as pg
 from example_hex import ExampleHex
 from example_hex import make_hex_surface
 
-COL_IDX = np.random.randint(0, 4, (7 ** 3))
 COLORS = np.array([
     [244, 98, 105],  # red
     [251, 149, 80],  # orange
@@ -16,6 +17,9 @@ COLORS = np.array([
     [53, 111, 163],  # water blue
     [85, 163, 193],  # sky blue
 ])
+
+
+make_hex_surface_cached = lru_cache(maxsize=None)(make_hex_surface)
 
 
 class Selection:
@@ -82,16 +86,21 @@ class ExampleHexMap():
         axial_coords = hx.cube_to_axial(coords)
 
         for i, axial in enumerate(axial_coords):
-            colo = list(COLORS[COL_IDX[i % len(COL_IDX)]])
-            colo.append(255)
-            hexes.append(ExampleHex(axial, colo, hex_radius))
+            hexes.append(ExampleHex(axial, [255, 255, 255, 255], hex_radius))
             hexes[-1].set_value(i)  # the number at the center of the hex
 
         self.hex_map[np.array(axial_coords)] = hexes
 
+        for hex in self.hex_map.values():
+            nn = self.nn(hex)
+            hex.coordination = len(nn)
+            hex.value = hex.coordination + 1
+
         self.main_surf = None
         self.font = None
         self.clock = None
+        self.energy = sum(v.value for v  in self.hex_map.values())
+        self.valid = False
         self.init_pg()
 
     def init_pg(self):
@@ -144,31 +153,84 @@ class ExampleHexMap():
         rad_hex_axial = hx.cube_to_axial(rad_hex)
         hexes = self.hex_map[rad_hex_axial]
 
-        list(map(lambda hexagon: 
-                self.main_surf.blit(
-                    self.selected_hex_image, hexagon.get_draw_position() + self.center), 
-                hexes))
+        for hexagon in hexes:
+            self.main_surf.blit(self.selected_hex_image, hexagon.get_draw_position() + self.center)
 
         # draw hud
-        self.selection_type
-
         fps_text = self.font.render(" FPS: " + str(int(self.clock.get_fps())), True, (50, 50, 50))
         n_text = self.font.render(" N: " + str(self.max_coord + 1), True, (50, 50, 50))
+        energy_text = self.font.render(" ENERGY: " + str(self.energy), True, (50, 50, 50))
+        valid_text = self.font.render(" VALID: " + str(self.valid), True, (50, 50, 50))
 
         self.main_surf.blit(fps_text, (5, 0))
         self.main_surf.blit(n_text, (5, 15))
+        self.main_surf.blit(energy_text, (5, 30))
+        self.main_surf.blit(valid_text, (5, 45))
 
         # Update screen
         pg.display.update()
         self.main_surf.fill(COLORS[-1])
         self.clock.tick(30)
 
+    def update_values(self):
+        hexes = list(self.hex_map.values())
+        shuffle(hexes)
+        for hex in hexes:
+            nn = self.nn(hex)
+            required_values = set(range(1, min(hex.value, len(nn))))
+            to_drop = []
+            for i, h in enumerate(nn):
+                if h.value in required_values:
+                    required_values.remove(h.value)
+                    to_drop.append(i)
+            for i in reversed(to_drop):
+                nn.pop(i)
+
+            required_values = list(required_values)
+            shuffle(nn)
+            shuffle(required_values)
+            for i, r in enumerate(required_values):
+                nn[i].value = r
+
+            hex.color = list(COLORS[hex.value % len(COLORS)])
+            hex.color.append(255)
+            hex.image = make_hex_surface_cached(tuple(hex.color), hex.radius)
+
+        self.energy = sum(v.value for v  in self.hex_map.values())
+
+    @lru_cache(maxsize=None)
+    def nn(self, hex: ExampleHex):
+        rad_hex = Selection.get_selection(self.selection_type, hex.cube_coordinates, self.rad)
+        rad_hex_axial = hx.cube_to_axial(rad_hex)
+        return self.hex_map[rad_hex_axial]
+
+    @staticmethod
+    @lru_cache(maxsize=None)
+    def _must_contain(n: int):
+        must_contain = set(range(1, n))
+        must_contain.add(1)
+        return must_contain
+
+    def is_valid(self):
+        self.valid = False
+        for hex in self.hex_map.values():
+            nn = self.nn(hex)
+            values = set(n.value for n in nn)
+            must_have = self._must_contain(hex.value)
+            if not must_have.issubset(values):
+                return False
+        self.valid = True
+        return True
+
     def quit_app(self):
         pg.quit()
 
 
 if __name__ == '__main__':
-    ehm = ExampleHexMap(int(sys.argv[1]))
+    n = 3 if len(sys.argv) == 1 else int(sys.argv[1])
+    ehm = ExampleHexMap(n)
     while ehm.main_loop():
         ehm.draw()
+        if not ehm.is_valid():
+            ehm.update_values()
     ehm.quit_app()

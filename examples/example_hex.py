@@ -59,6 +59,10 @@ class ExampleHex(hx.HexTile):
         self.radius = radius
         self.image = make_hex_surface(color, radius)
         self.value = None
+        self.coordination = None
+
+    def __hash__(self):
+        return hash(tuple(map(int, self.axial_coordinates.flatten())))
 
     def set_value(self, value):
         self.value = value
